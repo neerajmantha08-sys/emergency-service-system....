@@ -1,0 +1,977 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  ShieldAlert, Ambulance, Flame, Shield, AlertTriangle, CheckCircle, 
+  Clock, Search, FileText, Download, Play, RefreshCw, Trash2, Edit3, 
+  User, Phone, MapPin, Hash, Plus, ArrowRight, Activity, FileSpreadsheet,
+  BarChart2, Layers, Check, X, Printer
+} from 'lucide-react';
+
+// ==========================================
+// CUSTOM DSA IMPLEMENTATIONS
+// ==========================================
+
+// 1. Binary Max-Heap Priority Queue for Critical Emergencies (P1/P2)
+class BinaryMaxHeapPriorityQueue {
+  constructor() {
+    this.heap = [];
+  }
+
+  enqueue(item) {
+    this.heap.push(item);
+    this.bubbleUp(this.heap.length - 1);
+  }
+
+  bubbleUp(index) {
+    while (index > 0) {
+      let parentIdx = Math.floor((index - 1) / 2);
+      if (this.compare(this.heap[index], this.heap[parentIdx]) > 0) {
+        [this.heap[index], this.heap[parentIdx]] = [this.heap[parentIdx], this.heap[index]];
+        index = parentIdx;
+      } else {
+        break;
+      }
+    }
+  }
+
+  dequeue() {
+    if (this.heap.length === 0) return null;
+    if (this.heap.length === 1) return this.heap.pop();
+    
+    const max = this.heap[0];
+    this.heap[0] = this.heap.pop();
+    this.sinkDown(0);
+    return max;
+  }
+
+  sinkDown(index) {
+    const length = this.heap.length;
+    while (true) {
+      let leftIdx = 2 * index + 1;
+      let rightIdx = 2 * index + 2;
+      let largest = index;
+
+      if (leftIdx < length && this.compare(this.heap[leftIdx], this.heap[largest]) > 0) {
+        largest = leftIdx;
+      }
+      if (rightIdx < length && this.compare(this.heap[rightIdx], this.heap[largest]) > 0) {
+        largest = rightIdx;
+      }
+
+      if (largest !== index) {
+        [this.heap[index], this.heap[largest]] = [this.heap[largest], this.heap[index]];
+        index = largest;
+      } else {
+        break;
+      }
+    }
+  }
+
+  compare(a, b) {
+    // Primary: Priority level (P1 highest, P4 lowest)
+    const prioMap = { P1: 4, P2: 3, P3: 2, P4: 1 };
+    const scoreA = prioMap[a.urgency] || 1;
+    const scoreB = prioMap[b.urgency] || 1;
+
+    if (scoreA !== scoreB) {
+      return scoreA - scoreB;
+    }
+    // Secondary: Earlier timestamp wins (FIFO tie-breaker)
+    return new Date(b.timestamp) - new Date(a.timestamp);
+  }
+
+  size() {
+    return this.heap.length;
+  }
+
+  getArray() {
+    return [...this.heap];
+  }
+}
+
+// 2. Circular FIFO Queue for Standard Emergencies (P3/P4)
+class CircularQueue {
+  constructor(capacity = 20) {
+    this.items = new Array(capacity);
+    this.capacity = capacity;
+    this.head = 0;
+    this.tail = 0;
+    this.count = 0;
+  }
+
+  enqueue(item) {
+    if (this.count === this.capacity) {
+      return false; // Queue full
+    }
+    this.items[this.tail] = item;
+    this.tail = (this.tail + 1) % this.capacity;
+    this.count++;
+    return true;
+  }
+
+  dequeue() {
+    if (this.count === 0) return null;
+    const item = this.items[this.head];
+    this.items[this.head] = null;
+    this.head = (this.head + 1) % this.capacity;
+    this.count--;
+    return item;
+  }
+
+  getArray() {
+    const result = [];
+    for (let i = 0; i < this.count; i++) {
+      let idx = (this.head + i) % this.capacity;
+      if (this.items[idx]) result.push(this.items[idx]);
+    }
+    return result;
+  }
+}
+
+// Initial Sample Dataset
+const INITIAL_EMERGENCIES = [
+  { id: 'EMG-1001', name: 'Mantha Neeraj', contact: '+91 98765 43210', location: 'Aurora Campus Rd, Sector 4', serviceType: 'Medical', urgency: 'P1', status: 'Pending', timestamp: new Date(Date.now() - 1000 * 60 * 25).toISOString(), description: 'Severe cardiac discomfort reported during laboratory hours.' },
+  { id: 'EMG-1002', name: 'Rajesh Sharma', contact: '+91 91234 56789', location: 'Warangal Highway Junction', serviceType: 'Fire', urgency: 'P1', status: 'Pending', timestamp: new Date(Date.now() - 1000 * 60 * 18).toISOString(), description: 'Commercial kitchen grease fire spreading to roof ventilation.' },
+  { id: 'EMG-1003', name: 'Priya Verma', contact: '+91 94400 11223', location: 'Peddapalli Main Market', serviceType: 'Police', urgency: 'P2', status: 'Pending', timestamp: new Date(Date.now() - 1000 * 60 * 12).toISOString(), description: 'Active collision site causing traffic lock and heated altercations.' },
+  { id: 'EMG-1004', name: 'Srinivas Rao', contact: '+91 98480 99887', location: 'Nizamabad Colony Phase 2', serviceType: 'Medical', urgency: 'P3', status: 'Pending', timestamp: new Date(Date.now() - 1000 * 60 * 8).toISOString(), description: 'Elderly individual minor fall, non-critical mobility assistance requested.' },
+  { id: 'EMG-1005', name: 'Ananya Reddy', contact: '+91 90001 23456', location: 'Hyderabad South East Depot', serviceType: 'Police', urgency: 'P4', status: 'Pending', timestamp: new Date(Date.now() - 1000 * 60 * 3).toISOString(), description: 'Lost personal wallet and identification cards near transit desk.' }
+];
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('home'); // 'home', 'queues', 'reports'
+  const [requests, setRequests] = useState(INITIAL_EMERGENCIES);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [selectedEmergency, setSelectedEmergency] = useState(null);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  // Form State
+  const [formData, setFormData] = useState({
+    name: '',
+    contact: '',
+    location: '',
+    serviceType: 'Medical',
+    urgency: 'P2',
+    description: ''
+  });
+  const [formErrors, setFormErrors] = useState({});
+
+  // Show Temporary Toast Feedback
+  const showNotification = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Synchronize Custom Queues with Requests
+  const { priorityQueueArray, standardQueueArray, lookupMap } = useMemo(() => {
+    const pq = new BinaryMaxHeapPriorityQueue();
+    const sq = new CircularQueue(50);
+    const map = new Map();
+
+    requests.forEach(req => {
+      map.set(req.id, req);
+      if (req.status === 'Pending') {
+        if (req.urgency === 'P1' || req.urgency === 'P2') {
+          pq.enqueue(req);
+        } else {
+          sq.enqueue(req);
+        }
+      }
+    });
+
+    return {
+      priorityQueueArray: pq.getArray(),
+      standardQueueArray: sq.getArray(),
+      lookupMap: map
+    };
+  }, [requests]);
+
+  // Handle Request Submission (Add Request)
+  const handleRegister = (e) => {
+    e.preventDefault();
+    const errors = {};
+    if (!formData.name.trim()) errors.name = 'Requester name is required';
+    if (!formData.contact.trim()) errors.contact = 'Contact number is required';
+    if (!formData.location.trim()) errors.location = 'Location details required';
+    
+    // Check for duplicate recent phone/location
+    const duplicate = requests.find(r => r.contact === formData.contact && r.status === 'Pending');
+    if (duplicate) {
+      errors.contact = 'A pending emergency is already registered under this contact number!';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+
+    const newId = `EMG-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newEmergency = {
+      id: newId,
+      name: formData.name.trim(),
+      contact: formData.contact.trim(),
+      location: formData.location.trim(),
+      serviceType: formData.serviceType,
+      urgency: formData.urgency,
+      description: formData.description.trim() || 'No additional caller details provided.',
+      status: 'Pending',
+      timestamp: new Date().toISOString()
+    };
+
+    setRequests(prev => [newEmergency, ...prev]);
+    setFormData({ name: '', contact: '', location: '', serviceType: 'Medical', urgency: 'P2', description: '' });
+    setFormErrors({});
+    showNotification(`Emergency Ticket ${newId} registered and queued successfully!`);
+  };
+
+  // Dispatch Next Request based on Heap Priority
+  const handleDispatchNext = () => {
+    if (priorityQueueArray.length > 0) {
+      const topPriority = priorityQueueArray[0];
+      setRequests(prev => prev.map(item => item.id === topPriority.id ? { ...item, status: 'Dispatched' } : item));
+      showNotification(`CRITICAL DISPATCH: Unit dispatched for High-Priority Incident ${topPriority.id} (${topPriority.serviceType})!`);
+    } else if (standardQueueArray.length > 0) {
+      const topStandard = standardQueueArray[0];
+      setRequests(prev => prev.map(item => item.id === topStandard.id ? { ...item, status: 'Dispatched' } : item));
+      showNotification(`STANDARD DISPATCH: Unit dispatched for Incident ${topStandard.id} (${topStandard.serviceType})`);
+    } else {
+      showNotification('EDGE CASE ENCOUNTERED: Emergency queue is currently empty! No pending calls to dispatch.');
+    }
+  };
+
+  // Status Actions (Process / Resolve / Cancel)
+  const handleStatusChange = (id, newStatus) => {
+    setRequests(prev => prev.map(req => req.id === id ? { ...req, status: newStatus } : req));
+    showNotification(`Request ${id} updated status to ${newStatus}`);
+  };
+
+  // Delete Request
+  const handleDelete = (id) => {
+    setRequests(prev => prev.filter(req => req.id !== id));
+    if (selectedEmergency?.id === id) setSelectedEmergency(null);
+    showNotification(`Request ${id} permanently removed from system records.`);
+  };
+
+  // Filtered & Searched Requests
+  const filteredRequests = useMemo(() => {
+    return requests.filter(req => {
+      const matchesSearch = 
+        req.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        req.contact.includes(searchQuery);
+      
+      const matchesStatus = statusFilter === 'ALL' || req.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [requests, searchQuery, statusFilter]);
+
+  // Statistics Summary
+  const stats = useMemo(() => {
+    return {
+      total: requests.length,
+      pending: requests.filter(r => r.status === 'Pending').length,
+      dispatched: requests.filter(r => r.status === 'Dispatched').length,
+      resolved: requests.filter(r => r.status === 'Resolved').length,
+      cancelled: requests.filter(r => r.status === 'Cancelled').length,
+      p1Count: requests.filter(r => r.urgency === 'P1' && r.status === 'Pending').length
+    };
+  }, [requests]);
+
+  // ==========================================
+  // DIRECT PDF REPORT GENERATION ENGINE
+  // ==========================================
+  const generateAndDownloadPDF = () => {
+    const reportDate = new Date().toLocaleString();
+    const rowsHtml = requests.map((r, i) => `
+      <tr style="border-bottom: 1px solid #E2E8F0; background-color: ${i % 2 === 0 ? '#FFFFFF' : '#F8FAFC'};">
+        <td style="padding: 10px; font-weight: bold; font-family: monospace;">${r.id}</td>
+        <td style="padding: 10px;">${r.name}<br/><span style="font-size:11px; color:#64748B;">${r.contact}</span></td>
+        <td style="padding: 10px;">${r.serviceType}</td>
+        <td style="padding: 10px;"><span style="padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size:11px; background-color: ${r.urgency === 'P1' ? '#FEE2E2' : r.urgency === 'P2' ? '#FFEDD5' : '#FEF3C7'}; color: ${r.urgency === 'P1' ? '#991B1B' : r.urgency === 'P2' ? '#9A3412' : '#92400E'};">${r.urgency}</span></td>
+        <td style="padding: 10px; font-size: 12px;">${r.location}</td>
+        <td style="padding: 10px;">
+          <span style="padding: 3px 8px; border-radius: 4px; font-size:11px; font-weight: 600; background-color: ${r.status === 'Pending' ? '#FEF3C7' : r.status === 'Dispatched' ? '#DBEAFE' : r.status === 'Resolved' ? '#DCFCE7' : '#F3F4F6'}; color: ${r.status === 'Pending' ? '#92400E' : r.status === 'Dispatched' ? '#1E40AF' : r.status === 'Resolved' ? '#166534' : '#374151'};">${r.status}</span>
+        </td>
+      </tr>
+    `).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Emergency Service Management Report - Group 10</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 30px; color: #1E293B; }
+          .header { border-bottom: 2px solid #DC2626; padding-bottom: 15px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+          .title { font-size: 24px; font-weight: bold; color: #991B1B; margin: 0; }
+          .subtitle { font-size: 13px; color: #64748B; margin-top: 4px; }
+          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 25px; }
+          .stat-card { background: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; text-align: center; }
+          .stat-num { font-size: 20px; font-weight: bold; color: #0F172A; }
+          .stat-lbl { font-size: 11px; color: #64748B; text-transform: uppercase; }
+          table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 15px; }
+          th { background-color: #0F172A; color: #FFFFFF; text-align: left; padding: 10px; font-size: 12px; }
+          .footer { margin-top: 30px; font-size: 11px; color: #94A3B8; text-align: center; border-top: 1px solid #E2E8F0; padding-top: 15px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">EMERGENCY SERVICE MANAGEMENT SYSTEM</h1>
+            <div class="subtitle">Group 10 - Official Emergency Operations Incident Log & Dispatch Report</div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #64748B;">
+            <strong>Generated:</strong> ${reportDate}<br/>
+            <strong>System:</strong> DSA Binary Heap Engine v2.4
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-num">${stats.total}</div><div class="stat-lbl">Total Incidents</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:#D97706">${stats.pending}</div><div class="stat-lbl">Pending Calls</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:#2563EB">${stats.dispatched}</div><div class="stat-lbl">Dispatched</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:#16A34A">${stats.resolved}</div><div class="stat-lbl">Resolved</div></div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Requester Name</th>
+              <th>Service</th>
+              <th>Priority</th>
+              <th>Location</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Emergency Service Management System (Group 10) • Automated Record Verification & Data Structure Queue System
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Download dynamic PDF/HTML Document
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Emergency_Service_Report_Group10_${Date.now()}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showNotification('PDF Incident Report downloaded successfully!');
+  };
+
+  return (
+    <div className="min-h-screen font-sans text-slate-800 bg-[#F8F8F3] relative selection:bg-red-100 selection:text-red-900"
+         style={{
+           backgroundImage: `radial-gradient(#E8ECE6 1.2px, transparent 1.2px)`,
+           backgroundSize: '24px 24px'
+         }}>
+
+      {/* Floating Notification Toast */}
+      {toastMessage && (
+        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-5 py-3.5 rounded-lg shadow-2xl flex items-center space-x-3 border border-slate-700 animate-bounce">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          <span className="text-sm font-medium">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Modern Browser Simulation Header Bar */}
+      <header className="sticky top-0 z-40 bg-[#F1F3F4] border-b border-[#E0E3E5] shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            
+            {/* System Title & Group Badge */}
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-red-600 rounded-lg text-white shadow-md">
+                <ShieldAlert className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h1 className="text-lg font-bold text-slate-900 tracking-tight">Emergency Service Management System</h1>
+                  <span className="px-2 py-0.5 text-xs font-bold bg-red-100 text-red-800 rounded border border-red-200">
+                    GROUP 10
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-mono">DSA Priority Queue & Dispatch Hub</p>
+              </div>
+            </div>
+
+            {/* Main Navigation Tabs */}
+            <nav className="flex items-center space-x-1 bg-[#EFEFEF] p-1 rounded-lg border border-slate-300">
+              <button
+                onClick={() => setActiveTab('home')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-md transition-all ${
+                  activeTab === 'home'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <Activity className="w-4 h-4 text-red-600" />
+                <span>Home & Register</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('queues')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-md transition-all ${
+                  activeTab === 'queues'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <Layers className="w-4 h-4 text-blue-600" />
+                <span>Live Queues ({stats.pending})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('reports')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-semibold rounded-md transition-all ${
+                  activeTab === 'reports'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Reports & Analytics</span>
+              </button>
+            </nav>
+
+            {/* Direct Action Export PDF Button */}
+            <button
+              onClick={generateAndDownloadPDF}
+              className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white font-medium text-xs px-4 py-2.5 rounded-lg shadow hover:shadow-md transition-all"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export PDF Report</span>
+            </button>
+
+          </div>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+        {/* Dynamic Metric Overview Banner */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span className="text-xs text-slate-500 font-medium">Total Emergencies</span>
+            <p className="text-2xl font-bold text-slate-900 mt-1">{stats.total}</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-amber-200 bg-amber-50/20 shadow-sm">
+            <span className="text-xs text-amber-700 font-medium">Pending In Queue</span>
+            <p className="text-2xl font-bold text-amber-600 mt-1">{stats.pending}</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-red-200 bg-red-50/20 shadow-sm">
+            <span className="text-xs text-red-700 font-medium">P1 High Critical</span>
+            <p className="text-2xl font-bold text-red-600 mt-1">{stats.p1Count}</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-blue-200 bg-blue-50/20 shadow-sm">
+            <span className="text-xs text-blue-700 font-medium">Dispatched</span>
+            <p className="text-2xl font-bold text-blue-600 mt-1">{stats.dispatched}</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-sm">
+            <span className="text-xs text-emerald-700 font-medium">Resolved</span>
+            <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.resolved}</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span className="text-xs text-slate-500 font-medium">Cancelled</span>
+            <p className="text-2xl font-bold text-slate-600 mt-1">{stats.cancelled}</p>
+          </div>
+        </div>
+
+        {/* TAB 1: HOME & REGISTRATION PORTAL */}
+        {activeTab === 'home' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Left Side: Registration Form Card */}
+            <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex items-center space-x-2 mb-4 pb-3 border-b border-slate-100">
+                <Plus className="w-5 h-5 text-red-600" />
+                <h2 className="text-base font-bold text-slate-900">1. Register Emergency Request</h2>
+              </div>
+
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Requester Full Name *</label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      placeholder="e.g. Mantha Neeraj"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className={`w-full pl-9 pr-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-red-500 outline-none ${
+                        formErrors.name ? 'border-red-500' : 'border-slate-300'
+                      }`}
+                    />
+                  </div>
+                  {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Contact Number *</label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      placeholder="e.g. +91 98765 43210"
+                      value={formData.contact}
+                      onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+                      className={`w-full pl-9 pr-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-red-500 outline-none ${
+                        formErrors.contact ? 'border-red-500' : 'border-slate-300'
+                      }`}
+                    />
+                  </div>
+                  {formErrors.contact && <p className="text-xs text-red-600 mt-1">{formErrors.contact}</p>}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Incident Location Details *</label>
+                  <div className="relative">
+                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      placeholder="e.g. Hyderabad South East, Station 4"
+                      value={formData.location}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                      className={`w-full pl-9 pr-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-red-500 outline-none ${
+                        formErrors.location ? 'border-red-500' : 'border-slate-300'
+                      }`}
+                    />
+                  </div>
+                  {formErrors.location && <p className="text-xs text-red-600 mt-1">{formErrors.location}</p>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Service Required</label>
+                    <select
+                      value={formData.serviceType}
+                      onChange={(e) => setFormData({ ...formData, serviceType: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none bg-white"
+                    >
+                      <option value="Medical">Medical (Ambulance)</option>
+                      <option value="Fire">Fire & Rescue</option>
+                      <option value="Police">Police Assistance</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Urgency Priority Level</label>
+                    <select
+                      value={formData.urgency}
+                      onChange={(e) => setFormData({ ...formData, urgency: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none bg-white font-medium"
+                    >
+                      <option value="P1">P1 - Critical / Life-Threatening (Heap Priority)</option>
+                      <option value="P2">P2 - Serious Hazard (Heap Priority)</option>
+                      <option value="P3">P3 - Moderate Standard (FIFO Queue)</option>
+                      <option value="P4">P4 - Non-Critical Incident (FIFO Queue)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Situation Description</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Provide additional emergency context..."
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full p-2.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none"
+                  ></textarea>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow transition-all flex items-center justify-center space-x-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Register Emergency & Add to DSA Queue</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Right Side: Quick Action & Live Call Preview Card */}
+            <div className="lg:col-span-7 space-y-6">
+              
+              {/* Dispatch Action Header Card */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Top Priority Dispatch Control</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Executes O(log N) Heap Dequeue to process highest priority emergency next.</p>
+                </div>
+                <button
+                  onClick={handleDispatchNext}
+                  className="px-5 py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-lg shadow flex items-center space-x-2 transition-all"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>Dispatch Next Call</span>
+                </button>
+              </div>
+
+              {/* Active & Pending Emergencies Table */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900">Active Emergency Desk</h3>
+                  
+                  {/* Status Quick Filter */}
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs text-slate-500">Filter:</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="text-xs border border-slate-300 rounded px-2 py-1 bg-white outline-none"
+                    >
+                      <option value="ALL">All Statuses</option>
+                      <option value="Pending">Pending Only</option>
+                      <option value="Dispatched">Dispatched</option>
+                      <option value="Resolved">Resolved</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                      <tr>
+                        <th className="p-3">ID & Time</th>
+                        <th className="p-3">Requester / Contact</th>
+                        <th className="p-3">Service</th>
+                        <th className="p-3">Urgency</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="text-center p-8 text-slate-400">
+                            No emergency requests matched the filter criteria.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredRequests.map((req) => (
+                          <tr key={req.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-3 font-mono">
+                              <span className="font-bold text-slate-900">{req.id}</span>
+                              <div className="text-[10px] text-slate-400">{new Date(req.timestamp).toLocaleTimeString()}</div>
+                            </td>
+                            <td className="p-3">
+                              <div className="font-semibold text-slate-800">{req.name}</div>
+                              <div className="text-[11px] text-slate-500">{req.contact}</div>
+                            </td>
+                            <td className="p-3">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${
+                                req.serviceType === 'Medical' ? 'bg-red-50 text-red-700 border border-red-200' :
+                                req.serviceType === 'Fire' ? 'bg-orange-50 text-orange-700 border border-orange-200' :
+                                'bg-blue-50 text-blue-700 border border-blue-200'
+                              }`}>
+                                {req.serviceType}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                                req.urgency === 'P1' ? 'bg-red-100 text-red-800' :
+                                req.urgency === 'P2' ? 'bg-amber-100 text-amber-800' :
+                                req.urgency === 'P3' ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {req.urgency}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                req.status === 'Pending' ? 'bg-amber-100 text-amber-800' :
+                                req.status === 'Dispatched' ? 'bg-blue-100 text-blue-800' :
+                                req.status === 'Resolved' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {req.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right space-x-1">
+                              {req.status === 'Pending' && (
+                                <button
+                                  onClick={() => handleStatusChange(req.id, 'Dispatched')}
+                                  title="Dispatch"
+                                  className="p-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded"
+                                >
+                                  <Play className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {req.status === 'Dispatched' && (
+                                <button
+                                  onClick={() => handleStatusChange(req.id, 'Resolved')}
+                                  title="Mark Resolved"
+                                  className="p-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setSelectedEmergency(req)}
+                                title="View Details"
+                                className="p-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(req.id)}
+                                title="Delete Record"
+                                className="p-1 bg-red-50 text-red-600 hover:bg-red-100 rounded"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* TAB 2: LIVE QUEUE VISUALIZER */}
+        {activeTab === 'queues' && (
+          <div className="space-y-6">
+            
+            {/* Priority Queue Heap Visualization Card */}
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-600"></span>
+                    <span>1. Priority Queue Visualizer (Binary Max-Heap: P1 & P2 Calls)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">High-urgency emergency calls arranged automatically by heap priority.</p>
+                </div>
+                <span className="text-xs font-mono font-bold px-3 py-1 bg-red-50 text-red-700 rounded-full border border-red-200">
+                  Heap Count: {priorityQueueArray.length}
+                </span>
+              </div>
+
+              {priorityQueueArray.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+                  No high-priority calls in the Binary Max-Heap queue.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {priorityQueueArray.map((item, idx) => (
+                    <div 
+                      key={item.id} 
+                      className={`p-4 rounded-lg border relative transition-all ${
+                        idx === 0 
+                          ? 'border-red-400 bg-red-50/30 ring-2 ring-red-500 ring-offset-1' 
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      {idx === 0 && (
+                        <span className="absolute -top-2.5 left-3 px-2 py-0.5 bg-red-600 text-white font-bold text-[10px] rounded shadow">
+                          FRONT OF HEAP QUEUE
+                        </span>
+                      )}
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-mono font-bold text-slate-900 text-xs">{item.id}</span>
+                        <span className="px-2 py-0.5 bg-red-100 text-red-800 text-[10px] font-bold rounded">
+                          {item.urgency}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-800">{item.name}</p>
+                      <p className="text-xs text-slate-500">{item.location}</p>
+                      <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                        <span>{item.serviceType}</span>
+                        <span>{new Date(item.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Circular Standard Queue Visualization Card */}
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+                    <span>2. Standard Queue Visualizer (Circular Queue: P3 & P4 Calls)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">Standard emergencies processed in First-In, First-Out (FIFO) chronological sequence.</p>
+                </div>
+                <span className="text-xs font-mono font-bold px-3 py-1 bg-blue-50 text-blue-700 rounded-full border border-blue-200">
+                  Standard Count: {standardQueueArray.length}
+                </span>
+              </div>
+
+              {standardQueueArray.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+                  Standard circular queue is empty.
+                </div>
+              ) : (
+                <div className="flex items-center space-x-3 overflow-x-auto pb-2">
+                  {standardQueueArray.map((item, idx) => (
+                    <div 
+                      key={item.id}
+                      className="min-w-[220px] p-4 rounded-lg border border-slate-200 bg-white shrink-0 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-mono font-bold text-xs text-slate-900">{item.id}</span>
+                        <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-800 font-bold text-[10px] rounded">
+                          {item.urgency}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-800">{item.name}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{item.location}</p>
+                      <span className="mt-2 block text-[10px] text-slate-400 font-mono">
+                        FIFO Index: #{idx + 1}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
+
+        {/* TAB 3: REPORTS & ANALYTICS */}
+        {activeTab === 'reports' && (
+          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
+            
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Emergency Incident History & Official Export</h3>
+                <p className="text-xs text-slate-500">Filter, query, and download complete incident audit logs.</p>
+              </div>
+
+              {/* PDF Download Trigger */}
+              <button
+                onClick={generateAndDownloadPDF}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow flex items-center space-x-2 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download PDF File Report</span>
+              </button>
+            </div>
+
+            {/* Instant Search Bar */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                type="text"
+                placeholder="Search emergency by ID, Requester Name, Location, or Contact..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            {/* Complete Data Table */}
+            <div className="overflow-x-auto border border-slate-200 rounded-lg">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
+                  <tr>
+                    <th className="p-3">Ticket ID</th>
+                    <th className="p-3">Requester Name</th>
+                    <th className="p-3">Contact</th>
+                    <th className="p-3">Service</th>
+                    <th className="p-3">Urgency</th>
+                    <th className="p-3">Location</th>
+                    <th className="p-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredRequests.map(req => (
+                    <tr key={req.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-mono font-bold text-slate-900">{req.id}</td>
+                      <td className="p-3 font-medium text-slate-800">{req.name}</td>
+                      <td className="p-3 text-slate-600">{req.contact}</td>
+                      <td className="p-3">{req.serviceType}</td>
+                      <td className="p-3 font-bold">{req.urgency}</td>
+                      <td className="p-3 text-slate-600">{req.location}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          req.status === 'Pending' ? 'bg-amber-100 text-amber-800' :
+                          req.status === 'Dispatched' ? 'bg-blue-100 text-blue-800' :
+                          req.status === 'Resolved' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {req.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        )}
+
+      </main>
+
+      {/* Emergency Detail Modal View */}
+      {selectedEmergency && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-6 max-w-md w-full shadow-2xl relative">
+            <button
+              onClick={() => setSelectedEmergency(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-2 mb-4 pb-3 border-b border-slate-100">
+              <ShieldAlert className="w-5 h-5 text-red-600" />
+              <h3 className="text-sm font-bold text-slate-900">Incident Ticket: {selectedEmergency.id}</h3>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="text-slate-400">Requester:</span>
+                <p className="font-semibold text-slate-800">{selectedEmergency.name}</p>
+              </div>
+              <div>
+                <span className="text-slate-400">Contact:</span>
+                <p className="font-semibold text-slate-800">{selectedEmergency.contact}</p>
+              </div>
+              <div>
+                <span className="text-slate-400">Location:</span>
+                <p className="font-semibold text-slate-800">{selectedEmergency.location}</p>
+              </div>
+              <div>
+                <span className="text-slate-400">Details / Caller Context:</span>
+                <p className="p-2.5 bg-slate-50 border border-slate-200 rounded mt-1 text-slate-700">{selectedEmergency.description}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setSelectedEmergency(null)}
+                className="px-4 py-2 bg-slate-800 text-white rounded text-xs font-semibold"
+              >
+                Close View
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
